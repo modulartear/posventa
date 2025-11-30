@@ -5,6 +5,7 @@ import { ToggleLeft, ToggleRight } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { LoyaltyCalculationType } from '../../types';
 import { getLoyaltyProgram, saveLoyaltyProgram, LoyaltyProgramInput } from '../../services/loyalty';
+import { QRCodeSVG } from 'qrcode.react';
 
 const calculationOptions: { value: LoyaltyCalculationType; label: string; description: string }[] = [
   {
@@ -27,15 +28,18 @@ const defaultProgram: LoyaltyProgramInput = {
   minPurchase: 0,
   minItems: 0,
   isActive: false,
+  rewardThresholdPoints: 0,
+  rewardLabel: '',
 };
 
 export default function LoyaltySettings() {
-  const { companyId } = useAuth();
+  const { companyId, company } = useAuth();
   const [form, setForm] = useState<LoyaltyProgramInput>(defaultProgram);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string>('');
   const [error, setError] = useState<string>('');
+  const registerUrl = company ? `${window.location.origin}/client/register?code=${company.code}` : '';
 
   useEffect(() => {
     const loadProgram = async () => {
@@ -53,6 +57,8 @@ export default function LoyaltySettings() {
             minPurchase: existing.minPurchase,
             minItems: existing.minItems,
             isActive: existing.isActive,
+            rewardThresholdPoints: existing.rewardThresholdPoints,
+            rewardLabel: existing.rewardLabel,
           });
         } else {
           setForm(defaultProgram);
@@ -102,6 +108,110 @@ export default function LoyaltySettings() {
         <h2 className="text-2xl font-bold mb-2">Programa de Puntos</h2>
         <p className="text-muted-foreground">Define cómo se acumulan los puntos por compra.</p>
       </div>
+
+      {/* Resumen del programa en formato tabla */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Resumen de programas</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <p className="text-sm text-muted-foreground">Cargando programa de puntos...</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm border-collapse">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left py-2 px-3">Nombre</th>
+                    <th className="text-left py-2 px-3">Método</th>
+                    <th className="text-left py-2 px-3">Puntos / unidad</th>
+                    <th className="text-left py-2 px-3">Unidad</th>
+                    <th className="text-left py-2 px-3">Mín. compra</th>
+                    <th className="text-left py-2 px-3">Mín. productos</th>
+                    <th className="text-left py-2 px-3">Estado</th>
+                    <th className="text-left py-2 px-3">Acción</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b hover:bg-muted/50">
+                    <td className="py-2 px-3 font-medium">{form.name}</td>
+                    <td className="py-2 px-3">
+                      {form.calculationType === 'amount' ? 'Por monto' : 'Por cantidad'}
+                    </td>
+                    <td className="py-2 px-3">{form.pointsPerUnit}</td>
+                    <td className="py-2 px-3">
+                      {form.calculationType === 'amount'
+                        ? `${form.unitValue} $`
+                        : `${form.unitValue} productos`}
+                    </td>
+                    <td className="py-2 px-3">{form.minPurchase ?? 0}</td>
+                    <td className="py-2 px-3">{form.minItems ?? 0}</td>
+                    <td className="py-2 px-3">
+                      <span
+                        className={
+                          form.isActive
+                            ? 'inline-flex items-center rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700'
+                            : 'inline-flex items-center rounded-full bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-600'
+                        }
+                      >
+                        {form.isActive ? 'Activo' : 'Inactivo'}
+                      </span>
+                    </td>
+                    <td className="py-2 px-3">
+                      <button
+                        type="button"
+                        className="flex items-center gap-2"
+                        onClick={() => handleChange('isActive', !form.isActive)}
+                      >
+                        {form.isActive ? (
+                          <ToggleRight className="h-6 w-6 text-green-500" />
+                        ) : (
+                          <ToggleLeft className="h-6 w-6 text-gray-400" />
+                        )}
+                        <span className="text-xs">
+                          {form.isActive ? 'Desactivar' : 'Activar'}
+                        </span>
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {company && (
+        <Card>
+          <CardHeader>
+            <CardTitle>QR para registro de clientes</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Escaneando este código, tus clientes acceden al formulario público de registro y se suman al programa
+              de puntos de <span className="font-medium">{company.name}</span>.
+            </p>
+            <div className="flex flex-col items-center gap-3">
+              <div className="p-4 bg-white rounded-lg border shadow-sm">
+                <QRCodeSVG value={registerUrl} size={220} level="H" includeMargin />
+              </div>
+              <p className="text-xs text-muted-foreground text-center max-w-sm">
+                Puedes imprimir este QR y pegarlo en la barra o mostrarlo en una tablet para que los clientes se
+                registren con su DNI.
+              </p>
+              <div className="w-full">
+                <label className="block text-xs font-medium mb-1">Enlace público de registro</label>
+                <input
+                  type="text"
+                  readOnly
+                  value={registerUrl}
+                  className="w-full border rounded-lg px-3 py-2 text-xs bg-gray-50"
+                />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
@@ -210,6 +320,40 @@ export default function LoyaltySettings() {
                     : 'Ej: 2 puntos por cada producto comprado.'}
                 </p>
               </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Objetivo de puntos y recompensa</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="block text-sm font-medium mb-1">Puntos necesarios para premio</label>
+              <input
+                type="number"
+                min={0}
+                value={form.rewardThresholdPoints ?? 0}
+                onChange={(e) => handleChange('rewardThresholdPoints', Number(e.target.value))}
+                className="w-full border rounded-lg px-3 py-2"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Cantidad de puntos acumulados que se requieren para activar una recompensa.
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Descripción del premio</label>
+              <input
+                type="text"
+                value={form.rewardLabel ?? ''}
+                onChange={(e) => handleChange('rewardLabel', e.target.value)}
+                className="w-full border rounded-lg px-3 py-2"
+                placeholder="Ej: 1 trago gratis"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Texto que verá el cajero cuando el cliente cumpla el objetivo.
+              </p>
             </div>
           </CardContent>
         </Card>

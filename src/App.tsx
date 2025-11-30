@@ -6,6 +6,8 @@ import LoginPage from './pages/LoginPage';
 import RegisterCompanyPage from './pages/RegisterCompanyPage';
 import POSTerminal from './pages/POSTerminal';
 import ProtectedRoute from './components/ProtectedRoute';
+import ClientCardPage from './pages/ClientCardPage';
+import ClientRegisterPage from './pages/ClientRegisterPage';
 import './db/resetDatabase'; // Import to expose global functions
 import './utils/fixTokens'; // Import to expose fixTokens function
 
@@ -24,6 +26,8 @@ function App() {
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterCompanyPage />} />
+            <Route path="/client/register" element={<ClientRegisterPage />} />
+            <Route path="/client" element={<ClientCardPage />} />
             <Route 
               path="/admin" 
               element={

@@ -10,6 +10,7 @@ import CashRegisterClosing from '../components/admin/CashRegisterClosing';
 import ProductSelectionModal from '../components/ProductSelectionModal';
 import { Search, Store, Power, LogOut } from 'lucide-react';
 import { awardPoints } from '../services/points';
+import { getCustomerByDni } from '../services/customers';
 
 export default function POSTerminal() {
   const { token } = useParams<{ token: string }>();
@@ -152,7 +153,13 @@ export default function POSTerminal() {
     setSelectedProduct(product);
   };
 
-  const processSale = (product: Product, quantity: number, paymentMethod: 'cash' | 'card' | 'qr', receivedAmount?: number) => {
+  const processSale = async (
+    product: Product,
+    quantity: number,
+    paymentMethod: 'cash' | 'card' | 'qr',
+    receivedAmount?: number,
+    dni?: string
+  ) => {
     if (!cashRegister) return;
     
     const appliedPrice = paymentMethod === 'cash' ? product.cashPrice : product.cardPrice;
@@ -183,13 +190,32 @@ export default function POSTerminal() {
     };
 
     // Save sale
-    addSale(sale);
+    await addSale(sale);
     
     // Update cash register balance (only cash affects the register)
     if (paymentMethod === 'cash') {
       updateCashRegister(cashRegister.id, {
         currentBalance: cashRegister.currentBalance + total,
       });
+    }
+
+    // Award loyalty points if DNI is provided and company is known
+    if (dni && companyId) {
+      try {
+        const customer = await getCustomerByDni(companyId, dni);
+        if (customer) {
+          const result = await awardPoints(companyId, customer.customer.id, sale.id, total, [cartItem]);
+          if (result) {
+            let message = `¡${customer.customer.name || 'Cliente'} ganó ${result.pointsEarned} puntos!\nNuevo saldo: ${result.newBalance} puntos`;
+            if (result.rewardAvailable && result.rewardLabel) {
+              message += `\n\n🎁 Recompensa: ${result.rewardLabel}`;
+            }
+            alert(message);
+          }
+        }
+      } catch (error) {
+        console.error('Error awarding points (venta rápida):', error);
+      }
     }
 
     // Sale processed successfully - no alert needed
@@ -249,7 +275,11 @@ export default function POSTerminal() {
       try {
         const result = await awardPoints(companyId, customer.customer.id, sale.id, total, cart);
         if (result) {
-          alert(`¡${customer.customer.name || 'Cliente'} ganó ${result.pointsEarned} puntos!\nNuevo saldo: ${result.newBalance} puntos`);
+          let message = `¡${customer.customer.name || 'Cliente'} ganó ${result.pointsEarned} puntos!\nNuevo saldo: ${result.newBalance} puntos`;
+          if (result.rewardAvailable && result.rewardLabel) {
+            message += `\n\n🎁 Recompensa: ${result.rewardLabel}`;
+          }
+          alert(message);
         }
       } catch (error) {
         console.error('Error awarding points:', error);
@@ -390,8 +420,8 @@ export default function POSTerminal() {
       {selectedProduct && (
         <ProductSelectionModal
           product={selectedProduct}
-          onConfirm={(quantity, paymentMethod, receivedAmount) => {
-            processSale(selectedProduct, quantity, paymentMethod, receivedAmount);
+          onConfirm={async (quantity, paymentMethod, receivedAmount, dni) => {
+            await processSale(selectedProduct, quantity, paymentMethod, receivedAmount, dni);
             setSelectedProduct(null);
           }}
           onClose={() => setSelectedProduct(null)}

@@ -83,6 +83,8 @@ export interface LoyaltyProgram {
   minPurchase?: number;
   minItems?: number;
   isActive: boolean;
+  rewardThresholdPoints?: number;
+  rewardLabel?: string;
   updatedAt?: Date;
 }
 
@@ -90,6 +92,7 @@ export interface Customer {
   id: string;
   companyId: string;
   name?: string;
+  dni?: string;
   email?: string;
   phone?: string;
   qrCode: string;

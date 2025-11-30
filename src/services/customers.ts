@@ -3,6 +3,7 @@ import { Customer, CustomerPoints, SelectedCustomer } from '../types';
 
 export interface CustomerInput {
   name?: string;
+  dni?: string;
   email?: string;
   phone?: string;
 }
@@ -12,6 +13,7 @@ function mapCustomer(row: any): Customer {
     id: row.id,
     companyId: row.company_id,
     name: row.name || undefined,
+    dni: row.dni || undefined,
     email: row.email || undefined,
     phone: row.phone || undefined,
     qrCode: row.qr_code,
@@ -43,6 +45,10 @@ async function fetchCustomerPoints(companyId: string, customerId: string): Promi
   }
 
   return mapCustomerPoints(data);
+}
+
+export async function getOrCreateCustomerPoints(companyId: string, customerId: string): Promise<CustomerPoints> {
+  return ensureCustomerPoints(companyId, customerId);
 }
 
 async function ensureCustomerPoints(companyId: string, customerId: string): Promise<CustomerPoints> {
@@ -90,6 +96,64 @@ export async function getCustomerByQr(
   return { customer, points };
 }
 
+export async function getCustomerByDni(
+  companyId: string,
+  dni: string
+): Promise<SelectedCustomer | null> {
+  const { data, error } = await supabase
+    .from('customers')
+    .select('*')
+    .eq('company_id', companyId)
+    .eq('dni', dni)
+    .single();
+
+  if (error || !data) {
+    return null;
+  }
+
+  const customer = mapCustomer(data);
+  const points = await fetchCustomerPoints(companyId, customer.id);
+
+  return { customer, points };
+}
+
+export async function registerCustomerByDni(
+  companyId: string,
+  input: Required<Pick<CustomerInput, 'dni'>> & Omit<CustomerInput, 'dni'>
+): Promise<SelectedCustomer> {
+  // Intentar encontrar cliente existente por DNI para esta empresa
+  const existing = await getCustomerByDni(companyId, input.dni);
+  if (existing) {
+    // Actualizar datos básicos si cambiaron (nombre, email, teléfono)
+    const { customer } = existing;
+
+    const updatePayload: any = {
+      name: input.name ?? customer.name ?? null,
+      email: input.email ?? customer.email ?? null,
+      phone: input.phone ?? customer.phone ?? null,
+    };
+
+    const { data, error } = await supabase
+      .from('customers')
+      .update(updatePayload)
+      .eq('id', customer.id)
+      .select('*')
+      .single();
+
+    if (!error && data) {
+      const updatedCustomer = mapCustomer(data);
+      const points = await ensureCustomerPoints(companyId, updatedCustomer.id);
+      return { customer: updatedCustomer, points };
+    }
+
+    // Si falla la actualización, devolvemos el existente
+    return existing;
+  }
+
+  // Si no existe, crear nuevo cliente
+  return await createCustomer(companyId, input);
+}
+
 export async function createCustomer(
   companyId: string,
   input: CustomerInput
@@ -98,6 +162,7 @@ export async function createCustomer(
   const payload = {
     company_id: companyId,
     name: input.name || null,
+    dni: input.dni || null,
     email: input.email || null,
     phone: input.phone || null,
     qr_code: qrCode,
@@ -122,11 +187,15 @@ export async function createCustomer(
 export async function upsertCustomerPoints(
   companyId: string,
   customerId: string,
-  pointsChange: number
+  pointsChange: number,
+  overrideBalance?: number
 ): Promise<CustomerPoints> {
   const entry = await ensureCustomerPoints(companyId, customerId);
+  const newBalance =
+    overrideBalance !== undefined ? Math.max(0, overrideBalance) : Math.max(0, entry.pointsBalance + pointsChange);
+
   const updated = {
-    points_balance: Math.max(0, entry.pointsBalance + pointsChange),
+    points_balance: newBalance,
     lifetime_points: entry.lifetimePoints + Math.max(0, pointsChange),
   };
 

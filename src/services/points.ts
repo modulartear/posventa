@@ -1,12 +1,14 @@
 import { supabase } from '../lib/supabase';
 import { CartItem } from '../types';
 import { getLoyaltyProgram } from './loyalty';
-import { upsertCustomerPoints } from './customers';
+import { getOrCreateCustomerPoints, upsertCustomerPoints } from './customers';
 
 export interface PointsCalculationResult {
   pointsEarned: number;
   newBalance: number;
   programName: string;
+  rewardAvailable?: boolean;
+  rewardLabel?: string;
 }
 
 export async function calculatePoints(
@@ -59,9 +61,29 @@ export async function awardPoints(
   if (pointsEarned <= 0) {
     return null;
   }
+  
+  // Obtener saldo actual de puntos del cliente
+  const currentPoints = await getOrCreateCustomerPoints(companyId, customerId);
 
-  // Update customer points
-  const updatedPoints = await upsertCustomerPoints(companyId, customerId, pointsEarned);
+  // Detectar si se cruza el umbral de recompensa y decidir el nuevo saldo
+  let rewardAvailable = false;
+  let rewardLabel: string | undefined;
+  let newBalanceRaw = currentPoints.pointsBalance + pointsEarned;
+
+  if (program.rewardThresholdPoints && program.rewardThresholdPoints > 0) {
+    const threshold = program.rewardThresholdPoints;
+
+    // Si el saldo resultante es mayor o igual al umbral, se cumple el objetivo
+    if (newBalanceRaw >= threshold) {
+      rewardAvailable = true;
+      rewardLabel = program.rewardLabel || 'Recompensa disponible';
+      // Reiniciar acumulación de puntos al cumplir el objetivo
+      newBalanceRaw = 0;
+    }
+  }
+
+  // Actualizar puntos del cliente usando el nuevo saldo calculado
+  const updatedPoints = await upsertCustomerPoints(companyId, customerId, pointsEarned, newBalanceRaw);
 
   // Record transaction
   await supabase.from('point_transactions').insert([
@@ -83,5 +105,7 @@ export async function awardPoints(
     pointsEarned,
     newBalance: updatedPoints.pointsBalance,
     programName: program.name,
+    rewardAvailable,
+    rewardLabel,
   };
 }

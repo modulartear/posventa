@@ -4,7 +4,7 @@ import Button from './Button';
 import { X, QrCode, UserPlus, Users, Search } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { SelectedCustomer } from '../types';
-import { getCustomerByQr, createCustomer, CustomerInput } from '../services/customers';
+import { getCustomerByDni, createCustomer, CustomerInput } from '../services/customers';
 
 type Step = 'options' | 'search' | 'manual' | 'result';
 
@@ -19,18 +19,18 @@ export default function CustomerSelectorModal({ onClose, onSelect }: CustomerSel
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>('');
   const [result, setResult] = useState<SelectedCustomer | null>(null);
-  const [manualInput, setManualInput] = useState<CustomerInput>({ name: '', email: '', phone: '' });
-  const [searchCode, setSearchCode] = useState<string>('');
+  const [manualInput, setManualInput] = useState<CustomerInput>({ name: '', dni: '', email: '', phone: '' });
+  const [searchDni, setSearchDni] = useState<string>('');
 
   const handleSearchSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!searchCode.trim() || !companyId || loading) return;
+    if (!searchDni.trim() || !companyId || loading) return;
     setLoading(true);
     setError('');
     try {
-      const customer = await getCustomerByQr(companyId, searchCode.trim());
+      const customer = await getCustomerByDni(companyId, searchDni.trim());
       if (!customer) {
-        setError('No encontramos un cliente con ese código.');
+        setError('No encontramos un cliente con ese DNI.');
         return;
       }
       setResult(customer);
@@ -67,8 +67,8 @@ export default function CustomerSelectorModal({ onClose, onSelect }: CustomerSel
     setError('');
     setLoading(false);
     setResult(null);
-    setManualInput({ name: '', email: '', phone: '' });
-    setSearchCode('');
+    setManualInput({ name: '', dni: '', email: '', phone: '' });
+    setSearchDni('');
     setStep('options');
   };
 
@@ -91,10 +91,10 @@ export default function CustomerSelectorModal({ onClose, onSelect }: CustomerSel
               >
                 <div className="flex items-center gap-3 mb-2">
                   <Search className="h-5 w-5 text-primary" />
-                  <span className="font-semibold">Buscar por código</span>
+                  <span className="font-semibold">Buscar por DNI</span>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Ingresa el código QR del cliente manualmente.
+                  Ingresa el DNI del cliente para identificarlo.
                 </p>
               </button>
               <button
@@ -121,24 +121,24 @@ export default function CustomerSelectorModal({ onClose, onSelect }: CustomerSel
         return (
           <form className="space-y-4" onSubmit={handleSearchSubmit}>
             <div>
-              <label className="block text-sm font-medium mb-2">Código del cliente</label>
+              <label className="block text-sm font-medium mb-2">DNI del cliente</label>
               <input
                 type="text"
-                value={searchCode}
-                onChange={(e) => setSearchCode(e.target.value)}
+                value={searchDni}
+                onChange={(e) => setSearchDni(e.target.value)}
                 className="w-full border rounded-lg px-3 py-2"
-                placeholder="Ej: CUS-1234567890-ABC123"
+                placeholder="Ej: 12345678"
                 autoFocus
               />
               <p className="text-xs text-muted-foreground mt-1">
-                Ingresa el código QR que aparece en la tarjeta del cliente.
+                Ingresa el DNI que el cliente informa en caja.
               </p>
             </div>
             <div className="flex gap-3">
               <Button type="button" variant="secondary" className="flex-1" onClick={resetFlow}>
                 Cancelar
               </Button>
-              <Button type="submit" className="flex-1" disabled={loading || !searchCode.trim()}>
+              <Button type="submit" className="flex-1" disabled={loading || !searchDni.trim()}>
                 {loading ? 'Buscando...' : 'Buscar cliente'}
               </Button>
             </div>

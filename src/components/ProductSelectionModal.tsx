@@ -9,7 +9,7 @@ import QRPaymentModal from './QRPaymentModal';
 
 interface ProductSelectionModalProps {
   product: Product;
-  onConfirm: (quantity: number, paymentMethod: 'cash' | 'card' | 'qr', receivedAmount?: number) => void;
+  onConfirm: (quantity: number, paymentMethod: 'cash' | 'card' | 'qr', receivedAmount?: number, dni?: string) => void;
   onClose: () => void;
 }
 
@@ -23,6 +23,7 @@ export default function ProductSelectionModal({
   const [receivedAmount, setReceivedAmount] = useState<string>('');
   const [showCardPayment, setShowCardPayment] = useState(false);
   const [showQRPayment, setShowQRPayment] = useState(false);
+  const [dni, setDni] = useState<string>('');
 
   const selectedPrice = paymentMethod === 'cash' ? product.cashPrice : product.cardPrice;
   const total = selectedPrice * quantity;
@@ -34,7 +35,7 @@ export default function ProductSelectionModal({
         alert('Por favor ingresa un monto válido mayor o igual al total');
         return;
       }
-      onConfirm(quantity, paymentMethod, received);
+      onConfirm(quantity, paymentMethod, received, dni.trim() || undefined);
       onClose();
     } else if (paymentMethod === 'card') {
       // Card payment - open MercadoPago Point modal
@@ -47,7 +48,7 @@ export default function ProductSelectionModal({
 
   const handleCardPaymentSuccess = () => {
     // Payment successful, confirm the sale
-    onConfirm(quantity, paymentMethod);
+    onConfirm(quantity, paymentMethod, undefined, dni.trim() || undefined);
     setShowCardPayment(false);
     onClose();
   };
@@ -58,7 +59,7 @@ export default function ProductSelectionModal({
 
   const handleQRPaymentSuccess = () => {
     // Payment successful, confirm the sale
-    onConfirm(quantity, paymentMethod);
+    onConfirm(quantity, paymentMethod, undefined, dni.trim() || undefined);
     setShowQRPayment(false);
     onClose();
   };
@@ -215,6 +216,21 @@ export default function ProductSelectionModal({
               )}
             </div>
           )}
+
+          {/* Customer DNI (optional) */}
+          <div>
+            <label className="block text-sm font-medium mb-2">DNI del cliente (opcional)</label>
+            <input
+              type="text"
+              value={dni}
+              onChange={(e) => setDni(e.target.value)}
+              placeholder="Ingresa el DNI para acumular puntos"
+              className="w-full px-4 py-3 border-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Si ingresas el DNI y el cliente está registrado, esta compra sumará puntos a su cuenta.
+            </p>
+          </div>
 
           {/* Actions */}
           <div className="flex gap-3">

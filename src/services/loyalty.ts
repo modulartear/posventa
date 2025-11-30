@@ -9,6 +9,8 @@ export interface LoyaltyProgramInput {
   minPurchase?: number;
   minItems?: number;
   isActive: boolean;
+  rewardThresholdPoints?: number;
+  rewardLabel?: string;
 }
 
 function mapToLoyaltyProgram(data: any): LoyaltyProgram {
@@ -22,6 +24,8 @@ function mapToLoyaltyProgram(data: any): LoyaltyProgram {
     minPurchase: data.min_purchase !== null ? Number(data.min_purchase) : undefined,
     minItems: data.min_items !== null ? Number(data.min_items) : undefined,
     isActive: data.is_active,
+    rewardThresholdPoints: data.reward_threshold_points !== null ? Number(data.reward_threshold_points) : undefined,
+    rewardLabel: data.reward_label || undefined,
     updatedAt: data.updated_at ? new Date(data.updated_at) : undefined,
   };
 }
@@ -50,6 +54,8 @@ export async function saveLoyaltyProgram(companyId: string, input: LoyaltyProgra
     min_purchase: input.minPurchase ?? null,
     min_items: input.minItems ?? null,
     is_active: input.isActive,
+    reward_threshold_points: input.rewardThresholdPoints ?? null,
+    reward_label: input.rewardLabel ?? null,
     updated_at: new Date().toISOString(),
   };
 
