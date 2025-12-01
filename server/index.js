@@ -268,6 +268,8 @@ app.post('/api/pos/order/create', async (req, res) => {
 
     const data = await response.json();
 
+    console.log('🟣 Respuesta MP POS:', JSON.stringify(data, null, 2));
+
     res.json({ success: true, order: data });
   } catch (err) {
     res.status(500).json({ error: err.message });
