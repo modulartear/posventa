@@ -1,240 +1,184 @@
 /**
- * Backend Server for MercadoPago QR Integration
- * Handles QR generation and webhook notifications
+ * Backend Server for MercadoPago QR + POS (Point Smart)
+ * Versión unificada y compatible 2024–2025
  */
 
 const express = require('express');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
+const crypto = require('crypto');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Middleware - Allow all origins with explicit headers
+// -----------------------------
+//  CORS
+// -----------------------------
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  
-  // Handle preflight
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
-  }
-  
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
   next();
 });
-
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+app.use(cors());
 app.use(express.json());
 
-// Supabase client
+// -----------------------------
+//  Supabase
+// -----------------------------
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL,
   process.env.VITE_SUPABASE_ANON_KEY
 );
 
-// In-memory store for pending payments (in production, use Redis or DB)
+// Memoria temporal para QR
 const pendingPayments = new Map();
 
-/**
- * Get MercadoPago credentials for a company
- */
+// -----------------------------
+//  Credenciales por empresa
+// -----------------------------
 async function getMercadoPagoCredentials(companyId) {
   const { data, error } = await supabase
     .from('api_settings')
-    .select('mercadopago_access_token, mercadopago_public_key, mercadopago_enabled, mercadopago_user_id, mercadopago_store_id, mercadopago_pos_id')
+    .select(
+      'mercadopago_access_token, mercadopago_public_key, mercadopago_enabled, mercadopago_user_id, mercadopago_store_id, mercadopago_pos_id'
+    )
     .eq('company_id', companyId)
     .single();
 
-  if (error || !data || !data.mercadopago_enabled) {
-    return null;
-  }
+  if (error || !data || !data.mercadopago_enabled) return null;
 
   return {
     accessToken: data.mercadopago_access_token,
     publicKey: data.mercadopago_public_key,
     userId: data.mercadopago_user_id,
     storeId: data.mercadopago_store_id || 'STORE001',
-    posId: data.mercadopago_pos_id || 'POS001',
+    posId: data.mercadopago_pos_id || 'POS001'
   };
 }
 
-/**
- * POST /api/qr/create
- * Create QR payment
- */
+/* --------------------------------------------------------------------------
+   🟣   1) QR Dinámico
+-------------------------------------------------------------------------- */
+
 app.post('/api/qr/create', async (req, res) => {
   try {
-    console.log('📥 Received QR creation request');
-    console.log('📦 Body:', req.body);
-    console.log('🌐 Origin:', req.headers.origin);
-    
     const { amount, description, externalReference, companyId } = req.body;
 
-    console.log('🔵 Creating QR order:', { amount, description, externalReference, companyId });
-
-    // Get credentials
     const credentials = await getMercadoPagoCredentials(companyId);
     if (!credentials) {
       return res.status(400).json({
         success: false,
-        error: 'MercadoPago no está configurado para esta empresa',
+        error: 'MercadoPago no está configurado para esta empresa'
       });
     }
 
-    console.log('🔵 Creating QR Dynamic Order...');
+    const url = `https://api.mercadopago.com/instore/qr/seller/collectors/${credentials.userId}/pos/${externalReference}/qrs`;
 
-    // Create QR Dynamic Order (In-Store QR)
-    // This generates a QR that can be displayed on screen
-    const orderResponse = await fetch('https://api.mercadopago.com/instore/qr/seller/collectors/' + credentials.userId + '/pos/' + externalReference + '/qrs', {
+    const response = await fetch(url, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${credentials.accessToken}`,
-        'Content-Type': 'application/json',
+        Authorization: `Bearer ${credentials.accessToken}`,
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         external_reference: externalReference,
         title: description,
-        description: description,
+        description,
         total_amount: amount,
         items: [
           {
             sku_number: 'item-001',
             category: 'marketplace',
             title: description,
-            description: description,
+            description,
             unit_price: amount,
             quantity: 1,
             unit_measure: 'unit',
-            total_amount: amount,
+            total_amount: amount
           }
-        ],
-      }),
+        ]
+      })
     });
 
-    if (!orderResponse.ok) {
-      const errorText = await orderResponse.text();
-      console.error('❌ Error creating QR order:', errorText);
-      
-      return res.status(orderResponse.status).json({
+    if (!response.ok) {
+      return res.status(response.status).json({
         success: false,
-        error: 'Error al crear orden QR',
-        details: errorText,
+        error: 'Error al crear QR',
+        details: await response.text()
       });
     }
 
-    const order = await orderResponse.json();
-    console.log('✅ QR Order created:', order);
+    const order = await response.json();
 
-    // Store pending payment
     pendingPayments.set(externalReference, {
-      orderId: order.qr_data || externalReference,
+      orderId: order.qr_data,
       amount,
       description,
       companyId,
       status: 'pending',
-      createdAt: new Date(),
+      createdAt: new Date()
     });
 
     res.json({
       success: true,
-      orderId: order.qr_data || externalReference,
-      qrData: order.qr_data, // QR data to display
-      externalReference,
+      orderId: order.qr_data,
+      qrData: order.qr_data,
+      externalReference
     });
-  } catch (error) {
-    console.error('❌ Error creating QR:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Error interno del servidor',
-    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
-/**
- * POST /api/qr/webhook
- * Receive payment notifications from MercadoPago
- */
+/* --------------------------------------------------------------------------
+   🔔 WEBHOOK QR (forma vieja QR)
+-------------------------------------------------------------------------- */
 app.post('/api/qr/webhook', async (req, res) => {
   try {
-    console.log('🔔 Webhook received:', JSON.stringify(req.body, null, 2));
-
     const { type, data } = req.body;
 
-    // MercadoPago sends different types of notifications
     if (type === 'payment') {
       const paymentId = data.id;
 
-      // Find payment by searching all pending payments
-      let foundPayment = null;
-      let foundReference = null;
-
       for (const [reference, payment] of pendingPayments.entries()) {
         if (payment.status === 'pending') {
-          // Get credentials
           const credentials = await getMercadoPagoCredentials(payment.companyId);
           if (!credentials) continue;
 
-          // Get payment status from MercadoPago
-          const response = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
-            headers: {
-              'Authorization': `Bearer ${credentials.accessToken}`,
-            },
-          });
+          const resp = await fetch(
+            `https://api.mercadopago.com/v1/payments/${paymentId}`,
+            { headers: { Authorization: `Bearer ${credentials.accessToken}` } }
+          );
 
-          if (response.ok) {
-            const paymentData = await response.json();
-            
+          if (resp.ok) {
+            const paymentData = await resp.json();
+
             if (paymentData.external_reference === reference) {
-              foundPayment = payment;
-              foundReference = reference;
-              
-              console.log('💳 Payment found:', {
-                reference,
-                status: paymentData.status,
-                amount: paymentData.transaction_amount,
-              });
-
-              // Update payment status
               if (paymentData.status === 'approved') {
                 payment.status = 'approved';
                 payment.paymentId = paymentId;
-                payment.approvedAt = new Date();
-                pendingPayments.set(reference, payment);
-                console.log('✅ Payment approved:', reference);
               } else if (paymentData.status === 'rejected') {
                 payment.status = 'rejected';
-                pendingPayments.set(reference, payment);
-                console.log('❌ Payment rejected:', reference);
               }
-              
-              break;
+              pendingPayments.set(reference, payment);
             }
           }
         }
       }
-
-      if (!foundPayment) {
-        console.warn('⚠️ Payment not found for ID:', paymentId);
-      }
     }
 
     res.sendStatus(200);
-  } catch (error) {
-    console.error('❌ Webhook error:', error);
+  } catch (err) {
     res.sendStatus(500);
   }
 });
 
-/**
- * GET /api/qr/status/:externalReference
- * Check payment status
- */
+/* --------------------------------------------------------------------------
+   📊 Consultar estado de pago QR
+-------------------------------------------------------------------------- */
 app.get('/api/qr/status/:externalReference', (req, res) => {
   try {
     const { externalReference } = req.params;
@@ -253,166 +197,137 @@ app.get('/api/qr/status/:externalReference', (req, res) => {
       paymentId: payment.paymentId,
       orderId: payment.orderId,
     });
-  } catch (error) {
-    console.error('❌ Error checking status:', error);
+  } catch (err) {
     res.status(500).json({
       success: false,
-      error: error.message,
+      error: err.message,
     });
   }
 });
 
-/**
- * Health check
- */
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    timestamp: new Date(),
-    pendingPayments: pendingPayments.size,
-  });
-});
-
-/**
- * Test CORS
- */
-app.get('/test-cors', (req, res) => {
-  res.json({
-    message: 'CORS is working!',
-    origin: req.headers.origin,
-    timestamp: new Date(),
-  });
-});
-
-/**
- * Create payment intent for card payment (MercadoPago Point)
- */
-app.post('/api/card/create', async (req, res) => {
+/* --------------------------------------------------------------------------
+   🟣   2) Obtener dispositivos POS (Point Smart)
+-------------------------------------------------------------------------- */
+app.get('/api/pos/devices', async (req, res) => {
   try {
-    console.log('💳 Creating card payment intent...');
-    const { amount, description, externalReference, companyId } = req.body;
-
-    if (!amount || !description || !companyId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required fields',
-      });
-    }
-
-    // Get credentials
-    const credentials = await getMercadoPagoCredentials(companyId);
-    if (!credentials) {
-      return res.status(400).json({
-        success: false,
-        error: 'MercadoPago no está configurado para esta empresa',
-      });
-    }
-
-    // Create payment intent with MercadoPago Point API
-    const response = await fetch('https://api.mercadopago.com/point/integration-api/payment-intents', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${credentials.accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        amount,
-        description,
-        external_reference: externalReference,
-        payment: {
-          installments: 1,
-          type: 'credit_card',
-        },
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('❌ MercadoPago error:', errorText);
-      
-      let errorMessage = 'Error al crear payment intent';
-      if (response.status === 401) {
-        errorMessage = 'Credenciales de MercadoPago inválidas';
-      } else if (response.status === 404) {
-        errorMessage = 'No se encontró un dispositivo Point vinculado';
-      }
-      
-      return res.status(response.status).json({
-        success: false,
-        error: errorMessage,
-        details: errorText,
-      });
-    }
-
-    const result = await response.json();
-    console.log('✅ Payment intent created:', result.id);
-
-    res.json({
-      success: true,
-      paymentIntentId: result.id,
-    });
-  } catch (error) {
-    console.error('❌ Error creating payment intent:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Error interno del servidor',
-    });
-  }
-});
-
-/**
- * Get payment intent status
- */
-app.get('/api/card/status/:paymentIntentId', async (req, res) => {
-  try {
-    const { paymentIntentId } = req.params;
     const { companyId } = req.query;
-
-    if (!companyId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing companyId',
-      });
-    }
-
-    // Get credentials
     const credentials = await getMercadoPagoCredentials(companyId);
-    if (!credentials) {
-      return res.status(400).json({
-        success: false,
-        error: 'MercadoPago no está configurado',
-      });
-    }
 
-    // Get payment intent status
+    if (!credentials)
+      return res.status(400).json({ success: false, error: 'Credenciales no configuradas' });
+
+    const response = await fetch('https://api.mercadopago.com/v1/pos', {
+      headers: { Authorization: `Bearer ${credentials.accessToken}` }
+    });
+
+    const devices = await response.json();
+    res.json({ success: true, devices });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* --------------------------------------------------------------------------
+   🟣   3) Crear ORDEN REAL para POS físico
+-------------------------------------------------------------------------- */
+app.post('/api/pos/order/create', async (req, res) => {
+  try {
+    const { amount, description, externalReference, companyId, posId, storeId } =
+      req.body;
+
+    const credentials = await getMercadoPagoCredentials(companyId);
+    if (!credentials)
+      return res.status(400).json({ error: 'MercadoPago no configurado' });
+
+    const body = {
+      own_id: externalReference,
+      items: [
+        {
+          title: description,
+          quantity: 1,
+          unit_price: amount
+        }
+      ],
+      additional_info: {
+        pos_id: posId,
+        store_id: storeId
+      }
+    };
+
     const response = await fetch(
-      `https://api.mercadopago.com/point/integration-api/payment-intents/${paymentIntentId}`,
+      'https://api.mercadopago.com/v1/in_person_payments/point/orders',
       {
+        method: 'POST',
         headers: {
-          'Authorization': `Bearer ${credentials.accessToken}`,
+          Authorization: `Bearer ${credentials.accessToken}`,
+          'Content-Type': 'application/json'
         },
+        body: JSON.stringify(body)
       }
     );
 
-    if (!response.ok) {
-      throw new Error('Error getting payment status');
-    }
+    const data = await response.json();
 
-    const result = await response.json();
-    res.json(result);
-  } catch (error) {
-    console.error('❌ Error getting payment status:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+    res.json({ success: true, order: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
-// Start server
+/* --------------------------------------------------------------------------
+   🔔 WEBHOOK POS (Point Smart con firma HMAC)
+   Firma: x-signature: ts=...,v1=HASH
+          x-request-id
+-------------------------------------------------------------------------- */
+app.post('/api/pos/webhook', async (req, res) => {
+  try {
+    const signature = req.headers['x-signature'];
+    const requestId = req.headers['x-request-id'];
+    const orderId = req.body?.data?.id;
+
+    if (!signature || !requestId || !orderId) {
+      return res.status(400).send('missing headers');
+    }
+
+    const [tsPart, v1Part] = signature.split(',');
+    const ts = tsPart.split('=')[1];
+    const v1 = v1Part.split('=')[1];
+
+    const manifest = `id:${orderId};request-id:${requestId};ts:${ts};`;
+
+    const expected = crypto
+      .createHmac('sha256', process.env.MP_WEBHOOK_SECRET)
+      .update(manifest)
+      .digest('hex');
+
+    if (expected !== v1) {
+      return res.status(401).send('invalid signature');
+    }
+
+    console.log('🟢 Actualización de orden POS:', req.body);
+
+    return res.sendStatus(200);
+  } catch (err) {
+    res.status(500).send('error');
+  }
+});
+
+/* --------------------------------------------------------------------------
+   Health Check
+-------------------------------------------------------------------------- */
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date(),
+    pendingPayments: pendingPayments.size
+  });
+});
+
+/* --------------------------------------------------------------------------
+   Iniciar servidor
+-------------------------------------------------------------------------- */
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
-  console.log(`📡 Webhook URL: http://localhost:${PORT}/api/qr/webhook`);
-  console.log(`💳 Card payment: http://localhost:${PORT}/api/card/create`);
-  console.log(`🏥 Health check: http://localhost:${PORT}/health`);
+  console.log(`📡 Webhook QR: /api/qr/webhook`);
+  console.log(`📡 Webhook POS: /api/pos/webhook`);
 });
