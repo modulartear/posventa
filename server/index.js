@@ -235,9 +235,20 @@ app.post('/api/pos/order/create', async (req, res) => {
     const { amount, description, externalReference, companyId, posId, storeId } =
       req.body;
 
+    console.log('📥 Request POS:', { amount, description, externalReference, companyId });
+
     const credentials = await getMercadoPagoCredentials(companyId);
-    if (!credentials)
+    if (!credentials) {
+      console.error('❌ Credenciales no encontradas para companyId:', companyId);
       return res.status(400).json({ error: 'MercadoPago no configurado' });
+    }
+
+    console.log('✅ Credenciales obtenidas:', {
+      hasAccessToken: !!credentials.accessToken,
+      tokenPrefix: credentials.accessToken?.substring(0, 15) + '...',
+      posId: credentials.posId,
+      storeId: credentials.storeId
+    });
 
     const body = {
       own_id: externalReference,
@@ -249,10 +260,12 @@ app.post('/api/pos/order/create', async (req, res) => {
         }
       ],
       additional_info: {
-        pos_id: posId,
-        store_id: storeId
+        pos_id: parseInt(posId || credentials.posId),
+        store_id: String(storeId || credentials.storeId)
       }
     };
+
+    console.log('📤 Body enviado a MP:', JSON.stringify(body, null, 2));
 
     const response = await fetch(
       'https://api.mercadopago.com/v1/in_person_payments/point/orders',
@@ -270,9 +283,20 @@ app.post('/api/pos/order/create', async (req, res) => {
 
     console.log('🟣 Respuesta MP POS:', JSON.stringify(data, null, 2));
 
+    // Verificar si hay error en la respuesta
+    if (!response.ok || data.error) {
+      console.error('❌ Error de MercadoPago:', data);
+      return res.status(response.status || 400).json({ 
+        success: false,
+        error: data.message || data.error || 'Error al crear orden en el POS',
+        details: data
+      });
+    }
+
     res.json({ success: true, order: data });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('❌ Error en servidor:', err);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

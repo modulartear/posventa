@@ -4,8 +4,7 @@ import Button from './Button';
 import { X, QrCode, CheckCircle, XCircle, Loader2 } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
 import { useAuth } from '../contexts/AuthContext';
-import { processQRPayment } from '../services/mercadopago-qr-simple';
-import { QRCodeSVG } from 'qrcode.react';
+import { createPosOrder } from '../services/pos';
 
 interface QRPaymentModalProps {
   amount: number;
@@ -24,10 +23,9 @@ export default function QRPaymentModal({
 }: QRPaymentModalProps) {
   const { companyId } = useAuth();
   const [status, setStatus] = useState<PaymentStatus>('idle');
-  const [qrData, setQrData] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string>('');
 
-  const handleGenerateQR = async () => {
+  const handleStartPayment = async () => {
     if (!companyId) {
       setStatus('error');
       setErrorMessage('No se pudo identificar la empresa');
@@ -38,28 +36,38 @@ export default function QRPaymentModal({
     setErrorMessage('');
 
     try {
-      const result = await processQRPayment(
+      const externalReference = `qr_sale_${Date.now()}`;
+
+      console.log('🔵 Enviando orden al POS físico...');
+      const result = await createPosOrder({
         amount,
         description,
+        externalReference,
         companyId,
-        `qr_sale_${Date.now()}`
-      );
+      });
 
-      if (result.success && result.qrData && result.externalReference) {
-        setQrData(result.qrData);
-        setStatus('waiting');
-        
-        // Sin backend, el usuario debe confirmar manualmente
-        // El QR se muestra y el usuario escanea con su app de MercadoPago
-      } else {
+      if (!result.success) {
         setStatus('error');
-        setErrorMessage(result.error || 'Error al generar el código QR');
+        setErrorMessage(result.error || 'Error al crear orden en el POS');
+        return;
       }
+
+      console.log('✅ Orden QR enviada al POS:', result.order?.id);
+      setStatus('waiting');
     } catch (error: any) {
       setStatus('error');
       setErrorMessage(error.message || 'Error al procesar el pago');
     }
   };
+
+  // Enviar automáticamente la orden al POS cuando se abre el modal
+  useEffect(() => {
+    if (status === 'idle') {
+      handleStartPayment();
+    }
+    // Solo queremos llamarlo una vez al montar
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleCancel = () => {
     if (status === 'waiting') {
@@ -70,11 +78,6 @@ export default function QRPaymentModal({
       onCancel();
     }
   };
-
-  // Auto-generate QR on mount
-  useEffect(() => {
-    handleGenerateQR();
-  }, []);
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-[60]">
@@ -100,38 +103,22 @@ export default function QRPaymentModal({
             <p className="text-sm text-muted-foreground mt-2">{description}</p>
           </div>
 
-          {/* QR Code Display */}
+          {/* Estado de pago en POS */}
           {status === 'generating' && (
             <div className="flex flex-col items-center justify-center py-8">
               <Loader2 className="h-16 w-16 animate-spin text-primary mb-4" />
-              <p className="text-lg font-medium">Generando código QR...</p>
+              <p className="text-lg font-medium">Enviando orden al POS...</p>
               <p className="text-sm text-muted-foreground mt-2">Por favor espera</p>
             </div>
           )}
 
-          {status === 'waiting' && qrData && (
-            <div className="flex flex-col items-center">
-              <div className="p-6 bg-white rounded-lg border-2 border-gray-200 mb-4 shadow-lg">
-                <QRCodeSVG 
-                  value={qrData} 
-                  size={256}
-                  level="H"
-                  includeMargin={true}
-                />
-              </div>
-              
-              <div className="text-center space-y-2">
-                <div className="flex items-center justify-center gap-2">
-                  <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
-                  <p className="text-lg font-medium text-blue-600">Esperando pago...</p>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  Escanea el código QR con la app de MercadoPago
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  El pago se confirmará automáticamente
-                </p>
-              </div>
+          {status === 'waiting' && (
+            <div className="flex flex-col items-center justify-center py-8">
+              <Loader2 className="h-16 w-16 animate-spin text-primary mb-4" />
+              <p className="text-lg font-medium">Esperando pago en el POS...</p>
+              <p className="text-sm text-muted-foreground mt-2 text-center">
+                El cliente puede pagar con tarjeta o QR directamente en el dispositivo físico de MercadoPago.
+              </p>
             </div>
           )}
 
@@ -162,7 +149,7 @@ export default function QRPaymentModal({
                   Cancelar
                 </Button>
                 {(status === 'error' || status === 'cancelled') && (
-                  <Button onClick={handleGenerateQR} className="flex-1">
+                  <Button onClick={handleStartPayment} className="flex-1">
                     Reintentar
                   </Button>
                 )}
@@ -178,20 +165,6 @@ export default function QRPaymentModal({
               </>
             ) : null}
           </div>
-
-          {/* Instructions */}
-          {status === 'waiting' && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm">
-              <p className="font-medium text-blue-900 mb-2">📱 Instrucciones para el cliente:</p>
-              <ol className="list-decimal list-inside space-y-1 text-blue-800">
-                <li>Abre la app de MercadoPago en tu celular</li>
-                <li>Toca el ícono de escanear QR</li>
-                <li>Apunta la cámara al código QR de esta pantalla</li>
-                <li>Confirma el pago en tu celular</li>
-                <li>El pago se confirmará automáticamente aquí</li>
-              </ol>
-            </div>
-          )}
         </CardContent>
       </Card>
     </div>

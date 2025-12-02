@@ -4,6 +4,8 @@ import Button from './Button';
 import { X, CreditCard, Loader2, CheckCircle, XCircle } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
 import { PaymentResult } from '../services/mercadopago';
+import { useAuth } from '../contexts/AuthContext';
+import { createPosOrder } from '../services/pos';
 
 interface CardPaymentModalProps {
   amount: number;
@@ -20,12 +22,45 @@ export default function CardPaymentModal({
   onSuccess,
   onCancel,
 }: CardPaymentModalProps) {
+  const { companyId } = useAuth();
   const [status, setStatus] = useState<PaymentStatus>('idle');
   const [paymentResult, setPaymentResult] = useState<PaymentResult | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string>('');
 
-  const handleStartPayment = () => {
-    // Simply move to waiting state for manual confirmation
+  const handleStartPayment = async () => {
+    if (!companyId) {
+      setStatus('error');
+      setErrorMessage('No se pudo identificar la empresa');
+      return;
+    }
+
     setStatus('waiting');
+    setErrorMessage('');
+
+    try {
+      const externalReference = `card_sale_${Date.now()}`;
+
+      console.log('🔵 Enviando pago al POS físico...');
+      const result = await createPosOrder({
+        amount,
+        description,
+        externalReference,
+        companyId,
+      });
+
+      if (!result.success) {
+        setStatus('error');
+        setErrorMessage(result.error || 'Error al crear orden en el POS');
+        return;
+      }
+
+      console.log('✅ Orden enviada al POS:', result.order?.id);
+      // El POS físico ahora tiene la orden, esperamos confirmación manual del cajero
+    } catch (error: any) {
+      console.error('❌ Error:', error);
+      setStatus('error');
+      setErrorMessage(error.message || 'Error al procesar el pago');
+    }
   };
 
   const handleConfirmPayment = () => {
@@ -129,13 +164,10 @@ export default function CardPaymentModal({
               <div className="flex justify-center">
                 <XCircle className="h-16 w-16 text-red-500" />
               </div>
-              <div>
-                <p className="font-medium text-red-700 mb-2">Error en el pago</p>
-                <p className="text-muted-foreground">Esperando confirmación del pago...</p>
-                <p className="text-sm text-muted-foreground mt-2">
-                  El cliente debe pagar con su tarjeta en el posnet físico
-                </p>
-              </div>
+              <p className="font-medium text-red-700">Error en el pago</p>
+              <p className="text-sm text-muted-foreground">
+                {errorMessage || 'Por favor, intenta nuevamente'}
+              </p>
             </div>
           )}
 
