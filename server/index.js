@@ -250,6 +250,17 @@ app.post('/api/pos/order/create', async (req, res) => {
       storeId: credentials.storeId
     });
 
+    // Usar los valores de las credenciales directamente
+    const finalPosId = parseInt(credentials.posId);
+    const finalStoreId = String(credentials.storeId);
+
+    console.log('🔧 Valores finales:', {
+      finalPosId,
+      finalStoreId,
+      posIdType: typeof finalPosId,
+      storeIdType: typeof finalStoreId
+    });
+
     const body = {
       own_id: externalReference,
       items: [
@@ -260,8 +271,8 @@ app.post('/api/pos/order/create', async (req, res) => {
         }
       ],
       additional_info: {
-        pos_id: parseInt(posId || credentials.posId),
-        store_id: String(storeId || credentials.storeId)
+        pos_id: finalPosId,
+        store_id: finalStoreId
       }
     };
 
